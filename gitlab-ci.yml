@@ -1,0 +1,179 @@
+spec:
+  inputs:
+    service_name:
+    repository:
+      default: $CI_PROJECT_NAME
+    registry:
+      default: 192.168.X.Y:5000
+    prod_server_registry:
+      default: 10.0.X.Y:5000
+    build_test_server_ip:
+      default: 192.168.X.Y
+    dev_server_std:
+      default: sysadmin@192.168.X.Y
+    dev_server_pro:
+      default: sysadmin@192.168.X.Y
+    test_server_std:
+      default: sysadmin@192.168.X.Y
+    test_server_pro:
+      default: sysadmin@192.168.X.Y
+---
+
+variables:
+  IMAGE_REGISTRY: "$[[ inputs.registry ]]/$[[ inputs.repository ]]"
+  PROD_REGISTRY: "$[[ inputs.prod_server_registry ]]/$[[ inputs.repository ]]"
+
+# 1. BUILD & PUSH
+docker-build-base:
+  stage: build
+  tags:
+    - executor_shell
+  script: 
+    - |
+      VERSION_RAW=$(cat version | tr -d '[:space:]')
+      VERSION="$VERSION_RAW"
+
+      # Increment patch only on direct push
+      if [[ "$CI_PIPELINE_SOURCE" == "push" && "$CI_COMMIT_BRANCH" == "prod" && ! "$CI_COMMIT_MESSAGE" =~ "Merge branch" ]]; then
+        echo "Direct push detected. Incrementing version patch..."
+        if [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
+        elif [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          PATCH=$((BASH_REMATCH[4]+1))
+          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.$PATCH"
+        else
+          echo "Invalid version format: ${VERSION_RAW}"
+          exit 1
+        fi
+      else
+        echo "Merge detected. Using version from file: ${VERSION}"
+      fi
+
+      IMAGE_TAG="${VERSION}.${CI_COMMIT_SHORT_SHA}"
+      INTERNAL_IMAGE="${IMAGE_REGISTRY}:${IMAGE_TAG}"
+      echo "Building image: ${INTERNAL_IMAGE}"
+
+      docker build -t ${INTERNAL_IMAGE} .
+      docker push ${INTERNAL_IMAGE}
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "dev"
+      changes:
+        - version
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "test"
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "prod"
+
+# 2. DEPLOY DEV
+deploy-dev:
+  stage: deploy_dev
+  needs:
+    - job: docker-build-base
+  tags:
+    - executor_shell
+  script:
+    - VERSION=$(cat version | tr -d '[:space:]')
+    - IMAGE_TAG="${VERSION}.${CI_COMMIT_SHORT_SHA}"
+    - INTERNAL_IMAGE="${IMAGE_REGISTRY}:${IMAGE_TAG}"
+    - ssh -o StrictHostKeyChecking=no $[[ inputs.dev_server_std ]] "docker service update --force --with-registry-auth --image ${INTERNAL_IMAGE} $[[ inputs.service_name ]]" || true
+    - ssh -o StrictHostKeyChecking=no $[[ inputs.dev_server_std ]] "docker service inspect $[[ inputs.service_name ]] --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' | grep ${IMAGE_TAG}"
+    - ssh -o StrictHostKeyChecking=no $[[ inputs.dev_server_pro ]] "docker service update --force --with-registry-auth --image ${INTERNAL_IMAGE} $[[ inputs.service_name ]]" || true
+    - ssh -o StrictHostKeyChecking=no $[[ inputs.dev_server_pro ]] "docker service inspect $[[ inputs.service_name ]] --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' | grep ${IMAGE_TAG}"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "dev"
+      changes:
+        - version
+
+# 3. DEPLOY TEST (On Merge)
+deploy-test:
+  stage: deploy_test
+  needs:
+    - job: docker-build-base
+  tags:
+    - executor_shell
+  script:
+    - VERSION=$(cat version | tr -d '[:space:]')
+    - IMAGE_TAG="${VERSION}.${CI_COMMIT_SHORT_SHA}"
+    - INTERNAL_IMAGE="${IMAGE_REGISTRY}:${IMAGE_TAG}"
+    - ssh -o StrictHostKeyChecking=no $[[ inputs.test_server_std ]] "docker service update --force --with-registry-auth --image ${INTERNAL_IMAGE} $[[ inputs.service_name ]]" || true
+    - ssh -o StrictHostKeyChecking=no $[[ inputs.test_server_std ]] "docker service inspect $[[ inputs.service_name ]] --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' | grep ${IMAGE_TAG}"
+    - ssh -o StrictHostKeyChecking=no $[[ inputs.test_server_pro ]] "docker service update --force --with-registry-auth --image ${INTERNAL_IMAGE} $[[ inputs.service_name ]]" || true
+    - ssh -o StrictHostKeyChecking=no $[[ inputs.test_server_pro ]] "docker service inspect $[[ inputs.service_name ]] --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' | grep ${IMAGE_TAG}"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == "test"
+
+# 4. DEPLOY IMAGE ON PROD
+promote-prod:
+  stage: promote_prod
+  needs:
+    - job: docker-build-base
+  tags:
+    - executor_shell
+  script:
+    - |
+      VERSION_RAW=$(cat version | tr -d '[:space:]')
+      VERSION="$VERSION_RAW"
+
+      # Increment patch only on direct push
+      if [[ "$CI_PIPELINE_SOURCE" == "push" && ! "$CI_COMMIT_MESSAGE" =~ "Merge branch" ]]; then
+        echo "Direct push detected. Incrementing version patch..."
+        if [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
+        elif [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          PATCH=$((BASH_REMATCH[4]+1))
+          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.$PATCH"
+        else
+          echo "Invalid version format: ${VERSION_RAW}"
+          exit 1
+        fi
+      else
+        echo "Merge detected. Using version from file: ${VERSION}"
+      fi
+
+      IMAGE_TAG="${VERSION}.${CI_COMMIT_SHORT_SHA}"
+      INTERNAL_IMAGE="${IMAGE_REGISTRY}:${IMAGE_TAG}"
+      PROD_IMAGE="${PROD_REGISTRY}:${VERSION}"
+
+      docker pull ${INTERNAL_IMAGE}
+      docker tag ${INTERNAL_IMAGE} ${PROD_IMAGE}
+      docker push ${PROD_IMAGE}
+      echo "PROD_IMAGE: ${PROD_IMAGE}"
+  rules:
+    - if: $CI_COMMIT_BRANCH == "prod"
+
+# 5. AUTO-TAG PROD
+autotag-prod:
+  stage: promote_prod
+  needs:
+    - job: promote-prod
+  tags:
+    - executor_shell
+  script:
+    - |
+      VERSION_RAW=$(cat version | tr -d '[:space:]')
+      TAG_VERSION="$VERSION_RAW"
+
+      if [[ "$CI_PIPELINE_SOURCE" == "push" && ! "$CI_COMMIT_MESSAGE" =~ "Merge " ]]; then
+        echo "Direct push detected. Incrementing tag version..."
+        if [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          TAG_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
+        elif [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          PATCH=$((BASH_REMATCH[4]+1))
+          TAG_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.$PATCH"
+        else
+          echo "Invalid version format: ${VERSION_RAW}"
+          exit 1
+        fi
+      else
+        echo "Merge detected. Using version from file: ${TAG_VERSION}"
+      fi
+
+      # Configure Git Auth
+      git config user.email "gitlab-ci@infra.cloud"
+      git config user.name "GitLab CI Bot"
+      PUSH_URL="https://oauth2:${GITLAB_API_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+
+      # Create and Push Tag
+      echo "Creating Git Tag: ${TAG_VERSION}"
+      git tag "${TAG_VERSION}" "${CI_COMMIT_SHA}"
+      git push "${PUSH_URL}" "${TAG_VERSION}" -o ci.skip
+  rules:
+    - if: $CI_COMMIT_BRANCH == "prod"

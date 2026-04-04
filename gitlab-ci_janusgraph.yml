@@ -1,0 +1,465 @@
+stages:
+  - build
+  - deploy
+  - restart_service
+
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=/root/.m2/repository"
+  SERVER_USER: "sysadmin"
+  REMOTE_LIB: "/home/sysadmin/janusgraph/lib"
+  SWARM_SERVICE: "janusgraph"
+
+# =============================
+# BUILD STAGE (Docker executor)
+# =============================
+
+build-gsy:
+  stage: build
+  image: maven:3.9.4-eclipse-temurin-17
+  tags: [docker]
+  script:
+    - |
+      git -c http.sslVerify=false clone https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.infra.cloud/big-data/graphene-strategy.git
+      cd graphene-strategy
+      mvn clean install
+      JAR=$(ls target/graphene-strategy-*.jar | head -n 1)
+      echo "Built JAR: $JAR"
+  artifacts:
+    paths:
+      - graphene-strategy/target/graphene-strategy-*.jar
+    expire_in: 1 day
+
+build-jg-core:
+  stage: build
+  image: maven:3.9.4-eclipse-temurin-17
+  tags: [docker]
+  script:
+    - |
+      mvn clean package -pl janusgraph-core
+      JAR=$(ls janusgraph-core/target/janusgraph-core-*.jar | head -n 1)
+      echo "Built JAR: $JAR"
+  artifacts:
+    paths:
+      - janusgraph-core/target/janusgraph-core-*.jar
+    expire_in: 1 day
+  rules:
+    - changes:
+        - janusgraph-core/**/*
+
+build-jg-driver:
+  stage: build
+  image: maven:3.9.4-eclipse-temurin-17
+  tags: [docker]
+  script:
+    - |
+      mvn clean package -pl janusgraph-driver
+      JAR=$(ls janusgraph-driver/target/janusgraph-driver-*.jar | head -n 1)
+      echo "Built JAR: $JAR"
+  artifacts:
+    paths:
+      - janusgraph-driver/target/janusgraph-driver-*.jar
+    expire_in: 1 day
+  rules:
+    - changes:
+        - janusgraph-driver/**/*
+
+build-jg-es:
+  stage: build
+  image: maven:3.9.4-eclipse-temurin-17
+  tags: [docker]
+  script:
+    - |
+      mvn clean package -pl janusgraph-es
+      JAR=$(ls janusgraph-es/target/janusgraph-es-*.jar | head -n 1)
+      echo "Built JAR: $JAR"
+  artifacts:
+    paths:
+      - janusgraph-es/target/janusgraph-es-*.jar
+    expire_in: 1 day
+  rules:
+    - changes:
+        - janusgraph-es/**/*
+
+# =============================
+# DEPLOY STAGE (Shell executor)
+# =============================
+
+#
+# Deploy to dev-std
+#
+
+deploy-gsy-dev-std:
+  stage: deploy
+  resource_group: deploy-dev-std
+  needs:
+    - job: build-gsy
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no graphene-strategy/target/graphene-strategy-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t graphene-strategy-*.jar | head -n 1) graphene-strategy-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+      allow_failure: true
+
+deploy-jg-core-dev-std:
+  stage: deploy
+  resource_group: deploy-dev-std
+  needs:
+    - job: build-jg-core
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-core/target/janusgraph-core-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-core-*.jar | head -n 1) janusgraph-core-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+      changes:
+        - janusgraph-core/**/*
+
+deploy-jg-driver-dev-std:
+  stage: deploy
+  resource_group: deploy-dev-std
+  needs:
+    - job: build-jg-driver
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-driver/target/janusgraph-driver-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-driver-*.jar | head -n 1) janusgraph-driver-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+      changes:
+        - janusgraph-driver/**/*
+
+deploy-jg-es-dev-std:
+  stage: deploy
+  resource_group: deploy-dev-std
+  needs:
+    - job: build-jg-es
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-es/target/janusgraph-es-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-es-*.jar | head -n 1) janusgraph-es-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+      changes:
+        - janusgraph-es/**/*
+
+#
+# Deploy to dev-pro
+#
+
+deploy-gsy-dev-pro:
+  stage: deploy
+  resource_group: deploy-dev-pro
+  needs:
+    - job: build-gsy
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no graphene-strategy/target/graphene-strategy-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t graphene-strategy-*.jar | head -n 1) graphene-strategy-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+      allow_failure: true
+
+deploy-jg-core-dev-pro:
+  stage: deploy
+  resource_group: deploy-dev-pro
+  needs:
+    - job: build-jg-core
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-core/target/janusgraph-core-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-core-*.jar | head -n 1) janusgraph-core-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+      changes:
+        - janusgraph-core/**/*
+
+deploy-jg-driver-dev-pro:
+  stage: deploy
+  resource_group: deploy-dev-pro
+  needs:
+    - job: build-jg-driver
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-driver/target/janusgraph-driver-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-driver-*.jar | head -n 1) janusgraph-driver-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+      changes:
+        - janusgraph-driver/**/*
+
+deploy-jg-es-dev-pro:
+  stage: deploy
+  resource_group: deploy-dev-pro
+  needs:
+    - job: build-jg-es
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-es/target/janusgraph-es-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-es-*.jar | head -n 1) janusgraph-es-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+      changes:
+        - janusgraph-es/**/*
+
+#
+# Deploy to test-std
+#
+
+deploy-gsy-test-std:
+  stage: deploy
+  resource_group: deploy-test-std
+  needs:
+    - job: build-gsy
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no graphene-strategy/target/graphene-strategy-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t graphene-strategy-*.jar | head -n 1) graphene-strategy-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
+      allow_failure: true
+
+deploy-jg-core-test-std:
+  stage: deploy
+  resource_group: deploy-test-std
+  needs:
+    - job: build-jg-core
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-core/target/janusgraph-core-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-core-*.jar | head -n 1) janusgraph-core-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
+      changes:
+        - janusgraph-core/**/*
+
+deploy-jg-driver-test-std:
+  stage: deploy
+  resource_group: deploy-test-std
+  needs:
+    - job: build-jg-driver
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-driver/target/janusgraph-driver-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-driver-*.jar | head -n 1) janusgraph-driver-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
+      changes:
+        - janusgraph-driver/**/*
+
+deploy-jg-es-test-std:
+  stage: deploy
+  resource_group: deploy-test-std
+  needs:
+    - job: build-jg-es
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-es/target/janusgraph-es-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-es-*.jar | head -n 1) janusgraph-es-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
+      changes:
+        - janusgraph-es/**/*
+
+#
+# Deploy to test-pro
+#
+
+deploy-gsy-test-pro:
+  stage: deploy
+  resource_group: deploy-test-pro
+  needs:
+    - job: build-gsy
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no graphene-strategy/target/graphene-strategy-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t graphene-strategy-*.jar | head -n 1) graphene-strategy-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
+      allow_failure: true
+
+deploy-jg-core-test-pro:
+  stage: deploy
+  resource_group: deploy-test-pro
+  needs:
+    - job: build-jg-core
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-core/target/janusgraph-core-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-core-*.jar | head -n 1) janusgraph-core-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
+      changes:
+        - janusgraph-core/**/*
+
+deploy-jg-driver-test-pro:
+  stage: deploy
+  resource_group: deploy-test-pro
+  needs:
+    - job: build-jg-driver
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-driver/target/janusgraph-driver-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-driver-*.jar | head -n 1) janusgraph-driver-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
+      changes:
+        - janusgraph-driver/**/*
+
+deploy-jg-es-test-pro:
+  stage: deploy
+  resource_group: deploy-test-pro
+  needs:
+    - job: build-jg-es
+      optional: true
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  script:
+    - scp -o StrictHostKeyChecking=no janusgraph-es/target/janusgraph-es-*.jar $SERVER_USER@$SERVER_HOST:$REMOTE_LIB/
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd $REMOTE_LIB && ln -sfn \$(ls -t janusgraph-es-*.jar | head -n 1) janusgraph-es-current.jar"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
+      changes:
+        - janusgraph-es/**/*
+
+#
+# Restart service on dev-std
+#
+
+restart-janusgraph-dev-std:
+  stage: restart_service
+  resource_group: deploy-dev-std
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  needs:
+    - job: deploy-gsy-dev-std
+      optional: true
+    - job: deploy-jg-core-dev-std
+      optional: true
+    - job: deploy-jg-driver-dev-std
+      optional: true
+    - job: deploy-jg-es-dev-std
+      optional: true
+  script:
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker service update --force $SWARM_SERVICE"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+
+#
+# Restart service on dev-pro
+#
+
+restart-janusgraph-dev-pro:
+  stage: restart_service
+  resource_group: deploy-dev-pro
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  needs:
+    - job: deploy-gsy-dev-pro
+      optional: true
+    - job: deploy-jg-core-dev-pro
+      optional: true
+    - job: deploy-jg-driver-dev-pro
+      optional: true
+    - job: deploy-jg-es-dev-pro
+      optional: true
+  script:
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker service update --force $SWARM_SERVICE"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-dev/'
+
+#
+# Restart service on test-std
+#
+
+restart-janusgraph-test-std:
+  stage: restart_service
+  resource_group: deploy-test-std
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  needs:
+    - job: deploy-gsy-test-std
+      optional: true
+    - job: deploy-jg-core-test-std
+      optional: true
+    - job: deploy-jg-driver-test-std
+      optional: true
+    - job: deploy-jg-es-test-std
+      optional: true
+  script:
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker service update --force $SWARM_SERVICE"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
+
+#
+# Restart service on test-pro
+#
+
+restart-janusgraph-test-pro:
+  stage: restart_service
+  resource_group: deploy-test-pro
+  tags: [executor_shell]
+  variables:
+    SERVER_HOST: "192.168.X.Y"
+  needs:
+    - job: deploy-gsy-test-pro
+      optional: true
+    - job: deploy-jg-core-test-pro
+      optional: true
+    - job: deploy-jg-driver-test-pro
+      optional: true
+    - job: deploy-jg-es-test-pro
+      optional: true
+  script:
+    - ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker service update --force $SWARM_SERVICE"
+  rules:
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
