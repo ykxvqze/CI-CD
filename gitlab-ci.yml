@@ -33,20 +33,33 @@ docker-build-base:
       VERSION_RAW=$(cat version | tr -d '[:space:]')
       VERSION="$VERSION_RAW"
 
-      # Increment patch only on direct push
-      if [[ "$CI_PIPELINE_SOURCE" == "push" && "$CI_COMMIT_BRANCH" == "prod" && ! "$CI_COMMIT_MESSAGE" =~ "Merge branch" ]]; then
-        echo "Direct push detected. Incrementing version patch..."
-        if [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
-        elif [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-          PATCH=$((BASH_REMATCH[4]+1))
-          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.$PATCH"
-        else
-          echo "Invalid version format: ${VERSION_RAW}"
-          exit 1
-        fi
+      IS_HOTFIX=false
+
+      # Detect hotfix via merge commit message
+      if [[ "$CI_PIPELINE_SOURCE" == "push" && "$CI_COMMIT_BRANCH" == "prod" && "$CI_COMMIT_MESSAGE" =~ Merge\ branch\ \'(hotfix[^\']+)\' ]]; then
+        echo "Hotfix merge detected from branch: ${BASH_REMATCH[1]}"
+        IS_HOTFIX=true
+      fi
+
+      # Detect direct push to prod
+      if [[ "$CI_PIPELINE_SOURCE" == "push" && "$CI_COMMIT_BRANCH" == "prod" && ! "$CI_COMMIT_MESSAGE" =~ Merge\ branch ]]; then
+        echo "Direct push to prod detected"
+        IS_HOTFIX=true
+      fi
+
+      if [[ "$IS_HOTFIX" == "true" ]]; then
+          echo "Applying patch increment..."
+          if [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
+          elif [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              PATCH=$((BASH_REMATCH[4]+1))
+              VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.$PATCH"
+          else
+              echo "Invalid version format: ${VERSION_RAW}"
+              exit 1
+          fi
       else
-        echo "Merge detected. Using version from file: ${VERSION}"
+          echo "Non-hotfix merge detected. Using version from file: ${VERSION}"
       fi
 
       IMAGE_TAG="${VERSION}.${CI_COMMIT_SHORT_SHA}"
@@ -112,20 +125,33 @@ promote-prod:
       VERSION_RAW=$(cat version | tr -d '[:space:]')
       VERSION="$VERSION_RAW"
 
-      # Increment patch only on direct push
-      if [[ "$CI_PIPELINE_SOURCE" == "push" && ! "$CI_COMMIT_MESSAGE" =~ "Merge branch" ]]; then
-        echo "Direct push detected. Incrementing version patch..."
-        if [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
-        elif [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-          PATCH=$((BASH_REMATCH[4]+1))
-          VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.$PATCH"
-        else
-          echo "Invalid version format: ${VERSION_RAW}"
-          exit 1
-        fi
+      IS_HOTFIX=false
+
+      # Detect hotfix via merge commit message
+      if [[ "$CI_COMMIT_MESSAGE" =~ Merge\ branch\ \'(hotfix[^\']+)\' ]]; then
+        echo "Hotfix merge detected from branch: ${BASH_REMATCH[1]}"
+        IS_HOTFIX=true
+      fi
+
+      # Detect direct push to prod
+      if [[ "$CI_PIPELINE_SOURCE" == "push" && "$CI_COMMIT_BRANCH" == "prod" && ! "$CI_COMMIT_MESSAGE" =~ Merge\ branch ]]; then
+        echo "Direct push to prod detected"
+        IS_HOTFIX=true
+      fi
+
+      if [[ "$IS_HOTFIX" == "true" ]]; then
+          echo "Applying patch increment..."
+          if [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
+          elif [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              PATCH=$((BASH_REMATCH[4]+1))
+              VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.$PATCH"
+          else
+              echo "Invalid version format: ${VERSION_RAW}"
+              exit 1
+          fi
       else
-        echo "Merge detected. Using version from file: ${VERSION}"
+          echo "Non-hotfix merge detected. Using version from file: ${VERSION}"
       fi
 
       IMAGE_TAG="${VERSION}.${CI_COMMIT_SHORT_SHA}"
@@ -151,19 +177,33 @@ autotag-prod:
       VERSION_RAW=$(cat version | tr -d '[:space:]')
       TAG_VERSION="$VERSION_RAW"
 
-      if [[ "$CI_PIPELINE_SOURCE" == "push" && ! "$CI_COMMIT_MESSAGE" =~ "Merge " ]]; then
-        echo "Direct push detected. Incrementing tag version..."
-        if [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-          TAG_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
-        elif [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-          PATCH=$((BASH_REMATCH[4]+1))
-          TAG_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.$PATCH"
-        else
-          echo "Invalid version format: ${VERSION_RAW}"
-          exit 1
-        fi
+      IS_HOTFIX=false
+
+      # Detect hotfix via merge commit message
+      if [[ "$CI_COMMIT_MESSAGE" =~ Merge\ branch\ \'(hotfix[^\']+)\' ]]; then
+        echo "Hotfix merge detected from branch: ${BASH_REMATCH[1]}"
+        IS_HOTFIX=true
+      fi
+
+      # Detect direct push to prod
+      if [[ "$CI_PIPELINE_SOURCE" == "push" && "$CI_COMMIT_BRANCH" == "prod" && ! "$CI_COMMIT_MESSAGE" =~ Merge\ branch ]]; then
+        echo "Direct push to prod detected"
+        IS_HOTFIX=true
+      fi
+
+      if [[ "$IS_HOTFIX" == "true" ]]; then
+          echo "Applying patch increment..."
+          if [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              TAG_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.1"
+          elif [[ "$VERSION_RAW" =~ ^(v[0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              PATCH=$((BASH_REMATCH[4]+1))
+              TAG_VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}.$PATCH"
+          else
+              echo "Invalid version format: ${VERSION_RAW}"
+              exit 1
+          fi
       else
-        echo "Merge detected. Using version from file: ${TAG_VERSION}"
+          echo "Non-hotfix merge detected. Using version from file: ${TAG_VERSION}"
       fi
 
       # Configure Git Auth
