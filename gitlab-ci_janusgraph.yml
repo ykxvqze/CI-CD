@@ -27,7 +27,7 @@ build-gsy:
   artifacts:
     paths:
       - graphene-strategy/target/graphene-strategy-*.jar
-    expire_in: 1 day
+    expire_in: never
 
 build-jg-core:
   stage: build
@@ -41,10 +41,11 @@ build-jg-core:
   artifacts:
     paths:
       - janusgraph-core/target/janusgraph-core-*.jar
-    expire_in: 1 day
+    expire_in: never
   rules:
     - changes:
         - janusgraph-core/**/*
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
 
 build-jg-driver:
   stage: build
@@ -53,15 +54,18 @@ build-jg-driver:
   script:
     - |
       mvn clean package -pl janusgraph-driver
-      JAR=$(ls janusgraph-driver/target/janusgraph-driver-*.jar | head -n 1)
+      JAR=$(find janusgraph-driver/target -type f -name 'janusgraph-driver-*.jar' ! -name '*-javadoc.jar' | head -n 1)
       echo "Built JAR: $JAR"
   artifacts:
     paths:
       - janusgraph-driver/target/janusgraph-driver-*.jar
-    expire_in: 1 day
+    exclude:
+      - janusgraph-driver/target/*-javadoc.jar
+    expire_in: never
   rules:
     - changes:
         - janusgraph-driver/**/*
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
 
 build-jg-es:
   stage: build
@@ -70,15 +74,18 @@ build-jg-es:
   script:
     - |
       mvn clean package -pl janusgraph-es
-      JAR=$(ls janusgraph-es/target/janusgraph-es-*.jar | head -n 1)
+      JAR=$(find janusgraph-es/target -type f -name 'janusgraph-es-*.jar' ! -name '*-tests.jar' | head -n 1)
       echo "Built JAR: $JAR"
   artifacts:
     paths:
       - janusgraph-es/target/janusgraph-es-*.jar
-    expire_in: 1 day
+    exclude:
+      - janusgraph-es/target/*-tests.jar
+    expire_in: never
   rules:
     - changes:
         - janusgraph-es/**/*
+    - if: '$CI_COMMIT_MESSAGE =~ /deploy-test/'
 
 # =============================
 # DEPLOY STAGE (Shell executor)
