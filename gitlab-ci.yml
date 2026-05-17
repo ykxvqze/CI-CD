@@ -36,7 +36,7 @@ docker-build-base:
       IS_HOTFIX=false
 
       # Detect hotfix via merge commit message
-      if [[ "$CI_PIPELINE_SOURCE" == "push" && "$CI_COMMIT_BRANCH" == "prod" && "$CI_COMMIT_MESSAGE" =~ Merge\ branch\ \'(hotfix[^\']+)\' ]]; then
+      if [[ "$CI_PIPELINE_SOURCE" == "push" && "$CI_COMMIT_BRANCH" == "prod" && "$CI_COMMIT_MESSAGE" =~ Merge\ branch\ \'(hotfix[^\']*)\' ]]; then
         echo "Hotfix merge detected from branch: ${BASH_REMATCH[1]}"
         IS_HOTFIX=true
       fi
@@ -128,7 +128,7 @@ promote-prod:
       IS_HOTFIX=false
 
       # Detect hotfix via merge commit message
-      if [[ "$CI_COMMIT_MESSAGE" =~ Merge\ branch\ \'(hotfix[^\']+)\' ]]; then
+      if [[ "$CI_COMMIT_MESSAGE" =~ Merge\ branch\ \'(hotfix[^\']*)\' ]]; then
         echo "Hotfix merge detected from branch: ${BASH_REMATCH[1]}"
         IS_HOTFIX=true
       fi
@@ -180,7 +180,7 @@ autotag-prod:
       IS_HOTFIX=false
 
       # Detect hotfix via merge commit message
-      if [[ "$CI_COMMIT_MESSAGE" =~ Merge\ branch\ \'(hotfix[^\']+)\' ]]; then
+      if [[ "$CI_COMMIT_MESSAGE" =~ Merge\ branch\ \'(hotfix[^\']*)\' ]]; then
         echo "Hotfix merge detected from branch: ${BASH_REMATCH[1]}"
         IS_HOTFIX=true
       fi
